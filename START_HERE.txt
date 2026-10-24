@@ -1,0 +1,16 @@
+Alpha Radar V22.4 Guided Validation
+
+Do NOT delete data/.
+
+Normal daily workflow:
+1. Keep the existing prepared database.
+2. Open “V22快速策略驗證”.
+3. Press only “開始／繼續完整驗證”.
+4. The app automatically reuses or performs the one-time pool calibration, freezes that pool, compares manual / hybrid_ic / ic_adaptive for 5/20/60 sessions, and produces V22_TEST_REPORT.zip + V22_TEST_REPORT.xlsx.
+5. Download the report for the next factor/weight adjustment.
+
+If a run stops or errors, keep data/ and press “開始／繼續完整驗證” again after deploying the fix. Completed pool/data checkpoints are reused.
+
+Do not open the final holdout while tuning. The final confirmation is an advanced one-time action only after pool, factors and weights are frozen.
+
+For first-time market-data preparation, AUTO_FAST remains the recommended provider path. V22.4 does not reintroduce the slow FinMind-per-stock workflow.
