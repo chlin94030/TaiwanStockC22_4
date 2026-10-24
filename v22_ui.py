@@ -33,7 +33,7 @@ def _guided_profiles(default_profiles):
 
 def render(st, root):
     root=Path(root)
-    st.title('Alpha Radar V22.4｜一鍵接續驗證')
+    st.title('Alpha Radar V22.4.1｜一鍵接續驗證')
     st.caption(GUIDED_VERSION+'｜手機優先：資料 → 母池固定 → 5/20/60日策略比較 → 完整報告。')
     st.info('平常只按一個按鈕。系統會自動沿用已完成步驟；失敗後不刪資料、不重跑母池，修正後再按「開始／繼續」即可。')
 
