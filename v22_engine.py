@@ -165,9 +165,17 @@ def _evaluate_scored(sc,candidate,cfg,spec,score,coverage,effective_weights=None
         return out
     capacity=np.isfinite(c.amount20)&(c.amount20*cfg.max_amount_participation>=cfg.capital/cfg.top_k)
     score=np.where(capacity & np.isfinite(score),score,-np.inf)
-    order=np.lexsort((c.tickers,-score));core=order[np.isfinite(score[order])][:cfg.top_k]
-    chosen=[];counts={};cap=max(1,int(np.floor(cfg.top_k*spec['sector_cap'])))
-    for idx in core:
+    order=np.lexsort((c.tickers,-score));ranked=order[np.isfinite(score[order])]
+    core=ranked[:cfg.top_k]
+    # V22.4.2: discipline filters are applied BEFORE the funded list is finalized.
+    # Previously we filtered only the raw top_k and left rejected slots as cash,
+    # which confounded stock-model quality with an avoidable implementation underfill.
+    # Scan a bounded deeper list (4x top_k) and refill until top_k valid names are found.
+    scan_limit=min(len(ranked),max(cfg.top_k,cfg.top_k*4))
+    scan=ranked[:scan_limit]
+    chosen=[];counts={};cap=max(1,int(np.floor(cfg.top_k*spec['sector_cap'])));rank_depth_used=0
+    for rank_pos,idx in enumerate(scan, start=1):
+        rank_depth_used=rank_pos
         sec=sc.sectors[idx]
         if candidate['discipline']:
             if not np.isfinite(sc.rsi[idx]) or not np.isfinite(sc.bias[idx]) or sc.rsi[idx]>spec['max_rsi'] or sc.bias[idx]>spec['max_bias20']: continue
@@ -178,6 +186,7 @@ def _evaluate_scored(sc,candidate,cfg,spec,score,coverage,effective_weights=None
                             sc.double_bottom_rank[idx] if np.isfinite(sc.double_bottom_rank[idx]) else 0)
                 if confirm<spec['b3_confirmation_rank']: continue
         chosen.append(idx);counts[sec]=counts.get(sec,0)+1
+        if len(chosen)>=cfg.top_k: break
     vals=c.net[chosen];missing=int((~np.isfinite(vals)).sum());net=float(vals.sum()/cfg.top_k*exposure) if missing==0 else np.nan
     filled=float(c.filled[chosen].sum()/cfg.top_k*exposure);mdd=c.path_mdd[chosen]
     loss_floor=float(np.nansum(vals)/cfg.top_k*exposure-missing/cfg.top_k*exposure)
@@ -186,6 +195,8 @@ def _evaluate_scored(sc,candidate,cfg,spec,score,coverage,effective_weights=None
     out=dict(base,net=net,loss_floor=loss_floor,filled_weight=filled,stock_filled_weight=filled,feature_coverage=float(coverage),
         selected=c.tickers[chosen].tolist(),core_selected=c.tickers[core].tolist(),selected_scores=[float(score[i]) for i in chosen],
         missing_slots=cfg.top_k-len(chosen),cash_slots=cfg.top_k-len(chosen),position_mdd=pmdd,state=state,
+        refill_used=bool(len(chosen)>len(set(chosen).intersection(set(core.tolist())))),
+        rank_depth_used=int(rank_depth_used),screened_candidates=int(min(scan_limit,rank_depth_used)),
         excess_0050=net-c.benchmark if np.isfinite(net) and np.isfinite(c.benchmark) else np.nan,
         excess_pool=net-c.pool_net if np.isfinite(net) and np.isfinite(c.pool_net) else np.nan,
         exposure_matched_excess=net-c.benchmark*exposure if np.isfinite(net) and np.isfinite(c.benchmark) else np.nan,

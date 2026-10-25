@@ -1,4 +1,4 @@
-"""V22.4.1 one-click guided validation pipeline.
+"""V22.4.2 one-click guided validation pipeline.
 
 Normal users should not have to choose pool/model/JSON controls in the UI.
 This module resumes from durable checkpoints:
@@ -19,7 +19,7 @@ from studio_pool import load_dataset, load_pool, timestamp, digest
 from v22_cache import prepare_v22
 from v22_runner import run_pool_study, run_experiment
 
-GUIDED_VERSION = '22.4.1-guided-derived-pool-lock'
+GUIDED_VERSION = '22.4.2-guided-validation-refill'
 _STATE = 'guided_state.json'
 _POOL_LOCK = 'guided_pool_lock.json'
 _THREADS = {}
@@ -184,7 +184,7 @@ def _freeze_pool(root, dataset_id, pool, evidence_run=None, prepared=None):
         'derived_pool_membership_sha': membership_sha,
         'source_monthly_pools_sha': meta.get('files', {}).get('monthly_pools.csv.gz'),
         'derivation': 'v22_pool.build_v22_pools_from_pinned_ADV500',
-        'reason': 'V22_4_1_GUIDED_DEVELOPMENT_LOCK',
+        'reason': 'V22_4_2_GUIDED_DEVELOPMENT_LOCK',
         'evidence': evidence,
         'optimality_proven': False,
         'members_change_monthly_using_T_only_history': True,

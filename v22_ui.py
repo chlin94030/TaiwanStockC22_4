@@ -33,7 +33,7 @@ def _guided_profiles(default_profiles):
 
 def render(st, root):
     root=Path(root)
-    st.title('Alpha Radar V22.4.1｜一鍵接續驗證')
+    st.title('Alpha Radar V22.4.2｜一鍵接續驗證')
     st.caption(GUIDED_VERSION+'｜手機優先：資料 → 母池固定 → 5/20/60日策略比較 → 完整報告。')
     st.info('平常只按一個按鈕。系統會自動沿用已完成步驟；失敗後不刪資料、不重跑母池，修正後再按「開始／繼續」即可。')
 
@@ -66,6 +66,11 @@ def render(st, root):
     profiles=_guided_profiles(default_profiles)
     settings=read_json(HERE/'v22_settings.json')
     state=guided_state(root)
+    state_is_current = state.get('guided_version') == GUIDED_VERSION
+    # A completed report from an older validation engine is not discarded, but it
+    # must not disable the one-click button after a strategy-engine upgrade.
+    if state and not state_is_current:
+        st.info('偵測到較舊的驗證報告；資料庫與固定母池會保留，本次只會用新版驗證引擎重跑策略。')
 
     # Step 2/3 are automatic and resume-aware.
     pool=state.get('pool_rule')
@@ -83,8 +88,10 @@ def render(st, root):
     st.caption('不加入GBM、不開JSON、不需要手選模型，也不會查看最後保留期。')
 
     label='▶ 開始／繼續完整驗證'
-    if state.get('status')=='COMPLETE': label='✓ 驗證已完成（報告在下方）'
-    if st.button(label,type='primary',disabled=busy or state.get('status')=='COMPLETE',use_container_width=True):
+    current_complete = state_is_current and state.get('status')=='COMPLETE'
+    if current_complete: label='✓ 驗證已完成（報告在下方）'
+    elif state and not state_is_current: label='▶ 套用 V22.4.2 並重新驗證（保留資料／母池）'
+    if st.button(label,type='primary',disabled=busy or current_complete,use_container_width=True):
         try:
             start_guided(root,profiles,settings)
             st.success('已啟動。離開或重新整理頁面不會取消已完成的checkpoint；回來後可查看狀態。')
@@ -113,9 +120,9 @@ def render(st, root):
             for h,m in result.get('models',{}).items():
                 sm=m.get('development_validation') or {}
                 rows.append({'週期':str(h)+'日','母池':m.get('pool'),'勝出策略':(m.get('choice') or {}).get('name'),
-                    '模型':(m.get('choice') or {}).get('model_type','manual'),'開發分數':_fmt_pct(m.get('choice_score')),
-                    'vs 0050':_fmt_pct((sm.get('versus_0050') or {}).get('mean')),
-                    'vs 同母池':_fmt_pct((sm.get('versus_same_pool') or {}).get('mean')),
+                    '模型':(m.get('choice') or {}).get('model_type','manual'),'模型選擇分數':_fmt_pct(m.get('choice_score')),
+                    '選股能力(vs同池)':_fmt_pct((sm.get('versus_same_pool') or {}).get('mean')),
+                    '整體配置(vs0050)':_fmt_pct((sm.get('versus_0050') or {}).get('mean')),
                     '額外成本後':_fmt_pct(sm.get('extra_cost_stress_excess'))})
             if rows:st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
             if (run/'V22_TEST_REPORT.zip').is_file():

@@ -22,7 +22,7 @@ from v223_adaptive import factor_ic_summary, static_weight_suggestion, weights_f
 from v223_excel import build_excel
 from studio_runner import assert_confirmation_unused
 
-V22_VERSION='22.4-guided-one-click'
+V22_VERSION='22.4.2-validation-refill'
 DEFAULT_SPEC={'schema':1,'pool_rule':'KOSTO300','top_k':10,'capital':1000000.0,'fast_folds':3,'bootstrap_samples':300,
     'stage_confidence_floor':.03,'sector_cap':.30,'max_rsi':84.,'max_bias20':.14,'b3_confirmation_rank':.45,
     'cost_overrides':{}}
@@ -45,11 +45,36 @@ def configure(meta,spec):
     return cfg,s
 
 
-def _score_summary(rows,cfg):
+def _strict_score_summary(rows,cfg):
+    """Original maximin score retained for pool calibration / hard diagnostics."""
     sm=summarize_rows(rows,replace(cfg,block_bootstrap_samples=max(100,min(500,cfg.block_bootstrap_samples))))
     a=sm.get('versus_0050',{}).get('mean');b=sm.get('versus_same_pool',{}).get('mean');stress=sm.get('extra_cost_stress_excess')
     vals=[x for x in (a,b,stress) if x is not None and np.isfinite(x)]
     score=min(vals) if len(vals)==3 else -999.
+    return sm,float(score)
+
+
+def _selection_components(sm):
+    """Separate stock-selection skill from market-stage/allocation skill.
+
+    Candidate models only decide WHAT to buy; the stage gate decides WHEN/HOW MUCH.
+    Therefore model ranking emphasizes same-pool alpha while still charging a
+    meaningful policy/cost component. Acceptance blockers remain unchanged.
+    """
+    same=sm.get('versus_same_pool',{}).get('mean')
+    vs=sm.get('versus_0050',{}).get('mean')
+    stress=sm.get('extra_cost_stress_excess')
+    if any(x is None or not np.isfinite(x) for x in (same,vs,stress)):
+        return -999.,np.nan,np.nan
+    stock=float(same)
+    policy=float(min(vs,stress))
+    ranking=.70*stock+.30*policy
+    return float(ranking),stock,policy
+
+
+def _score_summary(rows,cfg):
+    sm=summarize_rows(rows,replace(cfg,block_bootstrap_samples=max(100,min(500,cfg.block_bootstrap_samples))))
+    score,_,_=_selection_components(sm)
     return sm,float(score)
 
 
@@ -58,8 +83,13 @@ def _candidate_table(candidates,records,test_ids,cfg,h,pool):
     for c in candidates:
         rr=[records[c['id']][i] for i in test_ids]
         sm,raw=_score_summary(rr,cfg);pen=MODEL_PENALTY.get(c.get('model_type','manual'),.001)
+        _,stock_score,policy_score=_selection_components(sm)
+        strict_vals=[sm.get('versus_0050',{}).get('mean'),sm.get('versus_same_pool',{}).get('mean'),sm.get('extra_cost_stress_excess')]
+        strict_score=min(strict_vals) if all(x is not None and np.isfinite(x) for x in strict_vals) else -999.
         rows.append({'horizon':h,'pool':pool,'name':c['name'],'candidate_id':c['id'],'model_type':c.get('model_type','manual'),
             'selection_eligible':bool(c.get('selection_eligible',True)),'raw_score':raw,'complexity_penalty':pen,'score':raw-pen,
+            'stock_selection_score':stock_score,'policy_score':policy_score,'strict_maximin_score':strict_score,
+            'ranking_formula':'70% same-pool alpha + 30% min(vs0050,cost-stress) - complexity penalty',
             'excess_0050':sm.get('versus_0050',{}).get('mean'),'excess_same_pool':sm.get('versus_same_pool',{}).get('mean'),
             'extra_cost_stress':sm.get('extra_cost_stress_excess'),'stock_capital_fraction':sm.get('stock_capital_fraction'),
             'known_0050':sm.get('versus_0050',{}).get('complete'),'planned':sm.get('versus_0050',{}).get('planned'),
@@ -144,8 +174,13 @@ def _export(run,result,files):
         'A1/B3 are accumulation zones, A2 is hold/wait proxy, A3/B1 are sell/avoid-new-buy, B2 is cash/wait.',
         'Holder counts and news reactions are NOT observed; breadth/turnover are disclosed proxies.','']
     for h,m in result['models'].items():
+        dv=m.get('development_validation',{}); stock=dv.get('versus_same_pool',{}).get('mean'); vs=dv.get('versus_0050',{}).get('mean'); stress=dv.get('extra_cost_stress_excess')
         lines += [f'=== {h} sessions ===',f"Pool: {m['pool']}",f"Winner: {m['choice']['name']}",f"Model type: {m['choice'].get('model_type','manual')}",
-            f"Development score after complexity penalty: {m['choice_score']:+.4%}",f"Verdict: {m['verdict']}",f"Final tail inspected: {m['final_tail_inspected']}",
+            f"Model-selection score after complexity penalty: {m['choice_score']:+.4%}",
+            f"Stock-selection alpha vs same pool: {stock:+.4%}" if stock is not None and np.isfinite(stock) else 'Stock-selection alpha: N/A',
+            f"Portfolio excess vs 0050: {vs:+.4%}" if vs is not None and np.isfinite(vs) else 'Portfolio excess vs 0050: N/A',
+            f"Extra-cost stress excess: {stress:+.4%}" if stress is not None and np.isfinite(stress) else 'Extra-cost stress excess: N/A',
+            f"Verdict: {m['verdict']}",f"Final tail inspected: {m['final_tail_inspected']}",
             'Stage performance: '+json.dumps(m['stage_performance'],ensure_ascii=False,default=lambda o:o.item() if hasattr(o,'item') else str(o)),'']
     lines += ['LIMITATIONS','- Adaptive weights use only already-matured historical labels; this is a predeclared online learner, not a static weight vector.',
         '- Book concepts are translated into testable proxies; they are not original formulas or guaranteed laws.',
@@ -156,8 +191,13 @@ def _export(run,result,files):
     (run/'REPORT.txt').write_text('\n'.join(lines)+'\n',encoding='utf-8-sig')
     md=['# Alpha Radar V22.4 — 一鍵完整驗證報告','',*['- '+x for x in lines[2:7]],'']
     for h,m in result['models'].items():
+        dv=m.get('development_validation',{}); stock=dv.get('versus_same_pool',{}).get('mean'); vs=dv.get('versus_0050',{}).get('mean'); stress=dv.get('extra_cost_stress_excess')
         md += [f"## {h}日",f"- 母池：**{m['pool']}**",f"- 開發期排名第一：**{m['choice']['name']}**",
-            f"- 模型：**{m['choice'].get('model_type','manual')}**",f"- 快速開發分數：**{m['choice_score']:+.3%}**",f"- 判定：**{m['verdict']}**",'']
+            f"- 模型：**{m['choice'].get('model_type','manual')}**",f"- 模型選擇分數：**{m['choice_score']:+.3%}**",
+            f"- 同母池選股超額：**{stock:+.3%}**" if stock is not None and np.isfinite(stock) else '- 同母池選股超額：N/A',
+            f"- 相對0050：**{vs:+.3%}**" if vs is not None and np.isfinite(vs) else '- 相對0050：N/A',
+            f"- 額外成本壓力後：**{stress:+.3%}**" if stress is not None and np.isfinite(stress) else '- 額外成本壓力後：N/A',
+            f"- 判定：**{m['verdict']}**",'']
     (run/'REPORT.md').write_text('\n'.join(md)+'\n',encoding='utf-8')
     workbook=build_excel(run,result)
     names=['REPORT.txt','REPORT.md','results.json']+[p.name for p in files if p.is_file()]
@@ -231,7 +271,9 @@ def run_experiment(root,profiles,spec=None,mode='fast',progress=None,check=None)
             for r in chosen_rows:
                 decision_export.append({'horizon':h,'date':r['date'],'pool':spec['pool_rule'],'stage':r['stage'],'stage_confidence':r['stage_confidence'],
                     'action':r['stage_action'],'candidate':choice['name'],'model_type':choice.get('model_type','manual'),'selected':'|'.join(r['selected']),
-                    'state':r['state'],'net':r['net'],'benchmark':r['benchmark'],'excess_0050':r['excess_0050'],'stock_exposure':r['stock_filled_weight']})
+                    'selected_count':len(r['selected']),'refill_used':r.get('refill_used',False),'rank_depth_used':r.get('rank_depth_used',0),
+                    'missing_slots':r.get('missing_slots',cfg.top_k),'state':r['state'],'net':r['net'],'benchmark':r['benchmark'],
+                    'excess_0050':r['excess_0050'],'stock_exposure':r['stock_filled_weight']})
             sensitivity += [dict(x,horizon=h,pool=spec['pool_rule'],candidate=choice['name']) for x in _factor_sensitivity(cc,choice,test_ids,cfg,spec,h)]
             aw,wi=_adaptive_exports(candidates,records,test_ids,h);adaptive_export+=aw;walk_ic_export+=wi
             ic_summary_export += [dict(x,horizon=h,pool=spec['pool_rule']) for x in factor_ic_summary(cc,test_ids)]
@@ -285,7 +327,7 @@ def run_pool_study(root,profiles,spec=None):
         for h,cc in cases.items():
             dates=pd.DatetimeIndex([x.base.date for x in cc]);exits=pd.DatetimeIndex([x.base.exit for x in cc]);boundary=dates[len(cc)-cfg.holdout_months]
             dev=matured_training_indices(dates,exits,boundary,calendar,cfg.gap_sessions);rr=[evaluate_at(cc,int(i),base,cfg,spec or DEFAULT_SPEC) for i in dev]
-            sm,score=_score_summary(rr,cfg);rows.append({'pool':pool,'horizon':h,'candidate':base['name'],'score':score,
+            sm,score=_strict_score_summary(rr,cfg);rows.append({'pool':pool,'horizon':h,'candidate':base['name'],'score':score,
                 'excess_0050':sm.get('versus_0050',{}).get('mean'),'excess_same_pool':sm.get('versus_same_pool',{}).get('mean'),
                 'extra_cost_stress':sm.get('extra_cost_stress_excess'),'dates':len(dev),'tail_used':False})
     frame=pd.DataFrame(rows);summary=frame.groupby('pool').score.agg(['mean','min']).reset_index().sort_values(['min','mean','pool'],ascending=[False,False,True])

@@ -1,4 +1,4 @@
-"""Alpha Radar V22.4.1 Guided Validation Studio.
+"""Alpha Radar V22.4.2 Guided Validation Studio.
 
 The data layer keeps the V22.2 coverage-safe bootstrap/cache workflow while
 the strategy layer adds horizon-specific, walk-forward adaptive models.
@@ -59,21 +59,21 @@ def quick_local_check(config):
     return out
 
 
-st.set_page_config(page_title='Alpha Radar V22.4.1', layout='wide')
+st.set_page_config(page_title='Alpha Radar V22.4.2', layout='wide')
 page=st.radio('工作模式',['V22快速策略驗證','資料準備與備份','舊版母池研究（必要時才開）'],horizontal=True)
 if page.startswith('V22'):
     from v22_ui import render
     render(st,ROOT)
     st.stop()
-st.title('Alpha Radar V22.4.1｜一鍵驗證＋快速資料準備')
-st.caption('Strategy 22.4.1-derived-pool-lock-fix • Data layer ' + VERSION + ' • 一鍵接續驗證，不會自動下單')
+st.title('Alpha Radar V22.4.2｜一鍵驗證＋快速資料準備')
+st.caption('Strategy 22.4.2-validation-refill • Data layer ' + VERSION + ' • 一鍵接續驗證，不會自動下單')
 st.write('同一日期比較過去一年日均成交金額前100／200／300／500檔；訓練期選因子及權重，後續分開驗證。')
 
 cfg = load_config(HERE / 'config.json')
 action='universe_search' if page.startswith('舊版') else 'prepare_data'
 cfg=replace(cfg,research_action=action)
 st.info('資料準備不搜尋權重；只有明確選母池研究才重跑四種母池。')
-st.info('資料層沿用V22.2 Coverage Fix：Yahoo批次先做252日歷史完整度檢查；缺漏ticker小批次修復，仍不足時切TWSE/TPEx，不會默默退回7小時FinMind。策略層已升級V22.4.1一鍵接續驗證（修正KOSTO衍生母池鎖定）。')
+st.info('資料層沿用V22.2 Coverage Fix：Yahoo批次先做252日歷史完整度檢查；缺漏ticker小批次修復，仍不足時切TWSE/TPEx，不會默默退回7小時FinMind。策略層已升級V22.4.2一鍵接續驗證（保留KOSTO衍生母池鎖定，新增紀律後補位與雙層驗證分數）。')
 access_token = secret_token()
 finlab_auth=activate_finlab_secrets()
 provider_label=st.radio('歷史資料傳輸', [
